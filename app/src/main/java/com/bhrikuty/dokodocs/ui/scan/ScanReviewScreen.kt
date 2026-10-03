@@ -139,14 +139,14 @@ fun ScanReviewScreen(
     }
 
     val filters = listOf(
-        FilterOption("original", "Original"),
-        FilterOption("magic_color", "Magic Color"),
-        FilterOption("shadow_remove", "Whiten & Clean"),
-        FilterOption("bw", "B & W Scan"),
-        FilterOption("grayscale", "Grayscale"),
-        FilterOption("high_contrast", "High Contrast"),
-        FilterOption("lighten", "Lighten"),
-        FilterOption("warm", "Warm")
+        FilterOption("magic_color", "✨ Magic Color (Auto)"),
+        FilterOption("bw", "🖨️ Crisp B&W Scan"),
+        FilterOption("shadow_remove", "📄 Whiten & Clean"),
+        FilterOption("high_contrast", "⚡ High Contrast"),
+        FilterOption("grayscale", "🩶 Grayscale"),
+        FilterOption("original", "📷 Original Photo"),
+        FilterOption("lighten", "☀️ Lighten"),
+        FilterOption("warm", "🕯️ Warm")
     )
 
     var showSaveDialog by remember { mutableStateOf(false) }

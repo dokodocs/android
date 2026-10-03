@@ -110,7 +110,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 data class ScannedPageItem(
     val bitmap: Bitmap,
     var quad: DocumentQuad? = null,
-    var filter: String = "original",
+    var filter: String = "magic_color",
     var qualityReport: QualityReport? = null,
     var classification: ClassificationResult? = null,
     var redactions: List<RedactionRect> = emptyList(),
@@ -148,6 +148,7 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
         val newItem = ScannedPageItem(
             bitmap = bitmap,
             quad = defaultQuad,
+            filter = "magic_color",
             sideLabel = side
         )
 

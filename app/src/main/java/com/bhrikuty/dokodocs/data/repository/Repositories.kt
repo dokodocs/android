@@ -75,17 +75,20 @@ class DocumentRepository(
                 rawBitmap
             }
 
+            // Apply selected filter to get enhanced high-contrast scan
+            val processedBitmap = ImageProcessor.applyFilter(warpedBitmap, filter)
+
             // Save raw original & processed image
             val origFile = File(docDir, "orig_page_$i.jpg")
             val procFile = File(docDir, "proc_page_$i.jpg")
 
             ImageProcessor.saveBitmapToFile(rawBitmap, origFile, 95)
-            ImageProcessor.saveBitmapToFile(warpedBitmap, procFile, 90)
+            ImageProcessor.saveBitmapToFile(processedBitmap, procFile, 92)
 
             pdfSources.add(
                 PdfPageSource(
                     imagePath = procFile.absolutePath,
-                    filter = filter,
+                    filter = "original", // already filtered in procFile
                     rotation = 0f
                 )
             )

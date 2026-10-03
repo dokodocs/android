@@ -105,15 +105,15 @@ object ImageProcessor {
         }
 
     /**
-     * Applies document filters (magic_color, shadow_remove, grayscale, bw, high_contrast, lighten, warm)
+     * Applies document filters (magic_color, shadow_remove, bw, grayscale, high_contrast, lighten, warm)
      */
     suspend fun applyFilter(srcBitmap: Bitmap, filterName: String): Bitmap =
         withContext(Dispatchers.Default) {
             when (filterName.lowercase()) {
-                "shadow_remove", "whiten" -> IlluminationEnhancer.removeShadowsAndWhiten(srcBitmap)
+                "magic_color", "enhance" -> IlluminationEnhancer.enhanceMagicColor(srcBitmap)
+                "shadow_remove", "whiten" -> IlluminationEnhancer.enhanceMagicColor(srcBitmap)
+                "bw", "black_and_white" -> IlluminationEnhancer.adaptiveBinarize(srcBitmap)
                 "grayscale" -> toGrayscale(srcBitmap)
-                "bw" -> toBlackAndWhite(srcBitmap)
-                "magic_color", "enhance" -> toMagicColor(srcBitmap)
                 "high_contrast" -> toHighContrast(srcBitmap)
                 "lighten" -> toLighten(srcBitmap)
                 "warm" -> toWarm(srcBitmap)
@@ -121,58 +121,44 @@ object ImageProcessor {
             }
         }
 
-    private fun toGrayscale(src: Bitmap): Bitmap {
-        val result = Bitmap.createBitmap(src.width, src.height, Bitmap.Config.ARGB_8888)
+    private suspend fun toGrayscale(src: Bitmap): Bitmap = withContext(Dispatchers.Default) {
+        // First enhance illumination to normalize shadows
+        val enhanced = IlluminationEnhancer.enhanceMagicColor(src)
+        val result = Bitmap.createBitmap(enhanced.width, enhanced.height, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(result)
-        val paint = Paint()
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG)
         val cm = ColorMatrix().apply { setSaturation(0f) }
         paint.colorFilter = ColorMatrixColorFilter(cm)
-        canvas.drawBitmap(src, 0f, 0f, paint)
-        return result
+        canvas.drawBitmap(enhanced, 0f, 0f, paint)
+        result
     }
 
-    private fun toMagicColor(src: Bitmap): Bitmap {
-        val result = Bitmap.createBitmap(src.width, src.height, Bitmap.Config.ARGB_8888)
+    private suspend fun toHighContrast(src: Bitmap): Bitmap = withContext(Dispatchers.Default) {
+        val enhanced = IlluminationEnhancer.enhanceMagicColor(src)
+        val result = Bitmap.createBitmap(enhanced.width, enhanced.height, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(result)
-        val paint = Paint()
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG)
 
-        // Magic color: slight saturation boost + contrast bump + brightness lift
         val cm = ColorMatrix(floatArrayOf(
-            1.25f, 0f, 0f, 0f, 10f,
-            0f, 1.25f, 0f, 0f, 10f,
-            0f, 0f, 1.25f, 0f, 10f,
+            1.4f, 0f, 0f, 0f, -25f,
+            0f, 1.4f, 0f, 0f, -25f,
+            0f, 0f, 1.4f, 0f, -25f,
             0f, 0f, 0f, 1f, 0f
         ))
         paint.colorFilter = ColorMatrixColorFilter(cm)
-        canvas.drawBitmap(src, 0f, 0f, paint)
-        return result
-    }
-
-    private fun toHighContrast(src: Bitmap): Bitmap {
-        val result = Bitmap.createBitmap(src.width, src.height, Bitmap.Config.ARGB_8888)
-        val canvas = Canvas(result)
-        val paint = Paint()
-
-        val cm = ColorMatrix(floatArrayOf(
-            1.6f, 0f, 0f, 0f, -50f,
-            0f, 1.6f, 0f, 0f, -50f,
-            0f, 0f, 1.6f, 0f, -50f,
-            0f, 0f, 0f, 1f, 0f
-        ))
-        paint.colorFilter = ColorMatrixColorFilter(cm)
-        canvas.drawBitmap(src, 0f, 0f, paint)
-        return result
+        canvas.drawBitmap(enhanced, 0f, 0f, paint)
+        result
     }
 
     private fun toLighten(src: Bitmap): Bitmap {
         val result = Bitmap.createBitmap(src.width, src.height, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(result)
-        val paint = Paint()
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG)
 
         val cm = ColorMatrix(floatArrayOf(
-            1.1f, 0f, 0f, 0f, 40f,
-            0f, 1.1f, 0f, 0f, 40f,
-            0f, 0f, 1.1f, 0f, 40f,
+            1.15f, 0f, 0f, 0f, 35f,
+            0f, 1.15f, 0f, 0f, 35f,
+            0f, 0f, 1.15f, 0f, 35f,
             0f, 0f, 0f, 1f, 0f
         ))
         paint.colorFilter = ColorMatrixColorFilter(cm)
@@ -183,7 +169,7 @@ object ImageProcessor {
     private fun toWarm(src: Bitmap): Bitmap {
         val result = Bitmap.createBitmap(src.width, src.height, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(result)
-        val paint = Paint()
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG)
 
         val cm = ColorMatrix(floatArrayOf(
             1.1f, 0f, 0f, 0f, 20f,
@@ -194,30 +180,6 @@ object ImageProcessor {
         paint.colorFilter = ColorMatrixColorFilter(cm)
         canvas.drawBitmap(src, 0f, 0f, paint)
         return result
-    }
-
-    private fun toBlackAndWhite(src: Bitmap): Bitmap {
-        val gray = toGrayscale(src)
-        val width = gray.width
-        val height = gray.height
-        val pixels = IntArray(width * height)
-        gray.getPixels(pixels, 0, width, 0, 0, width, height)
-
-        // Compute Otsu / adaptive threshold
-        var sum = 0L
-        for (p in pixels) {
-            sum += (Color.red(p))
-        }
-        val threshold = (sum / pixels.size).toInt().coerceIn(100, 160)
-
-        for (i in pixels.indices) {
-            val v = Color.red(pixels[i])
-            pixels[i] = if (v > threshold) Color.WHITE else Color.BLACK
-        }
-
-        val bw = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-        bw.setPixels(pixels, 0, width, 0, 0, width, height)
-        return bw
     }
 
     suspend fun rotateBitmap(src: Bitmap, degrees: Float): Bitmap =
