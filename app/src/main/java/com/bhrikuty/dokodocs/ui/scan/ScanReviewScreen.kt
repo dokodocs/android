@@ -169,82 +169,31 @@ fun ScanReviewScreen(
             onDismissRequest = { if (!isSaving) showSaveDialog = false },
             title = {
                 Text(
-                    "Save PDF Document",
+                    "Save Document",
                     fontWeight = FontWeight.Bold,
                     fontSize = 18.sp
                 )
             },
             text = {
-                Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                Column {
                     OutlinedTextField(
                         value = docTitle,
                         onValueChange = { docTitle = it },
-                        label = { Text("Document Title") },
+                        label = { Text("Document Name") },
+                        placeholder = { Text("e.g. Citizenship, Bill, Passport") },
                         singleLine = true,
                         shape = RoundedCornerShape(12.dp),
                         modifier = Modifier.fillMaxWidth()
                     )
-                    Spacer(modifier = Modifier.height(14.dp))
-                    Text(
-                        text = "Preset / Format (सरकारी फाराम / साइज)",
-                        style = MaterialTheme.typography.labelLarge,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    val presets = listOf(
-                        PageSizeFormat.A4,
-                        PageSizeFormat.LOK_SEWA_200KB,
-                        PageSizeFormat.PASSPORT_500KB,
-                        PageSizeFormat.ID_2UP_A4,
-                        PageSizeFormat.AUTO
-                    )
-
-                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        presets.forEach { format ->
-                            val isSelected = selectedPageFormat == format
-                            Card(
-                                shape = RoundedCornerShape(10.dp),
-                                colors = CardDefaults.cardColors(
-                                    containerColor = if (isSelected) AppleBlue.copy(alpha = 0.15f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
-                                ),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable { selectedPageFormat = format }
-                                    .border(
-                                        width = if (isSelected) 1.5.dp else 0.5.dp,
-                                        color = if (isSelected) AppleBlue else Color.Transparent,
-                                        shape = RoundedCornerShape(10.dp)
-                                    )
-                                    .padding(horizontal = 12.dp, vertical = 8.dp)
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    Text(
-                                        text = format.displayName,
-                                        fontSize = 13.sp,
-                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                                        color = if (isSelected) AppleBlue else MaterialTheme.colorScheme.onSurface
-                                    )
-                                    if (isSelected) {
-                                        Icon(Icons.Default.CheckCircle, contentDescription = null, tint = AppleBlue, modifier = Modifier.size(16.dp))
-                                    }
-                                }
-                            }
-                        }
-                    }
                 }
             },
             confirmButton = {
                 Button(
-                    enabled = !isSaving,
+                    enabled = !isSaving && docTitle.isNotBlank(),
                     onClick = {
                         isSaving = true
                         viewModel.saveDocument(
-                            title = docTitle,
+                            title = docTitle.trim(),
                             pageSizeFormat = selectedPageFormat,
                             onSuccess = { docId ->
                                 isSaving = false
@@ -253,12 +202,13 @@ fun ScanReviewScreen(
                             }
                         )
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = PrimaryLight)
+                    colors = ButtonDefaults.buttonColors(containerColor = PrimaryLight),
+                    shape = RoundedCornerShape(12.dp)
                 ) {
                     if (isSaving) {
                         CircularProgressIndicator(modifier = Modifier.size(20.dp), color = Color.White)
                     } else {
-                        Text("Export PDF", fontWeight = FontWeight.Bold)
+                        Text("Save PDF", fontWeight = FontWeight.Bold)
                     }
                 }
             },

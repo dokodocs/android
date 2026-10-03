@@ -384,15 +384,30 @@ object DocumentDetector {
     private fun orderCorners(corners: List<Point2D>): List<Point2D> {
         if (corners.size != 4) return corners
 
-        // Sort by y to get top 2 and bottom 2
-        val sortedByY = corners.sortedBy { it.y }
-        val topTwo = sortedByY.take(2).sortedBy { it.x }
-        val bottomTwo = sortedByY.takeLast(2).sortedBy { it.x }
+        // Compute centroid
+        val cx = (corners[0].x + corners[1].x + corners[2].x + corners[3].x) / 4f
+        val cy = (corners[0].y + corners[1].y + corners[2].y + corners[3].y) / 4f
 
-        val tl = topTwo[0]
-        val tr = topTwo[1]
-        val bl = bottomTwo[0]
-        val br = bottomTwo[1]
+        // Sort in polar angle clockwise order
+        val sortedClockwise = corners.sortedBy { p ->
+            atan2((p.y - cy).toDouble(), (p.x - cx).toDouble())
+        }
+
+        // Find the top-left anchor point (smallest sum of x + y)
+        var bestIdx = 0
+        var minSum = Float.MAX_VALUE
+        for (i in sortedClockwise.indices) {
+            val sum = sortedClockwise[i].x + sortedClockwise[i].y
+            if (sum < minSum) {
+                minSum = sum
+                bestIdx = i
+            }
+        }
+
+        val tl = sortedClockwise[bestIdx]
+        val tr = sortedClockwise[(bestIdx + 1) % 4]
+        val br = sortedClockwise[(bestIdx + 2) % 4]
+        val bl = sortedClockwise[(bestIdx + 3) % 4]
 
         return listOf(tl, tr, br, bl)
     }

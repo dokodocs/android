@@ -162,7 +162,7 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
         val pageIdx = updatedList.size - 1
         // Run edge detection, quality and classification analysis in background
         viewModelScope.launch(Dispatchers.Default) {
-            val detectedQuad = quad ?: DocumentDetector.detectDocument(bitmap)
+            val detectedQuad = DocumentDetector.detectDocument(bitmap)
             val report = QualityAnalyzer.analyzeQuality(bitmap, detectedQuad)
             val classification = NepaliDocumentClassifier.classify(
                 bitmap.width,
