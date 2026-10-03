@@ -9,6 +9,7 @@ import com.bhrikuty.dokodocs.core.calendar.CalendarSystem
 import com.bhrikuty.dokodocs.core.calendar.DateFormatter
 import com.bhrikuty.dokodocs.core.classifier.ClassificationResult
 import com.bhrikuty.dokodocs.core.classifier.NepaliDocumentClassifier
+import com.bhrikuty.dokodocs.core.image.DocumentDetector
 import com.bhrikuty.dokodocs.core.image.DocumentQuad
 import com.bhrikuty.dokodocs.core.image.ImageProcessor
 import com.bhrikuty.dokodocs.core.pdf.PageSizeFormat
@@ -158,13 +159,14 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         val pageIdx = updatedList.size - 1
-        // Run quality and classification analysis in background
+        // Run edge detection, quality and classification analysis in background
         viewModelScope.launch(Dispatchers.Default) {
-            val report = QualityAnalyzer.analyzeQuality(bitmap, defaultQuad)
+            val detectedQuad = quad ?: DocumentDetector.detectDocument(bitmap)
+            val report = QualityAnalyzer.analyzeQuality(bitmap, detectedQuad)
             val classification = NepaliDocumentClassifier.classify(
                 bitmap.width,
                 bitmap.height,
-                defaultQuad,
+                detectedQuad,
                 _selectedDocumentType.value
             )
 
@@ -172,6 +174,7 @@ class ScanViewModel(application: Application) : AndroidViewModel(application) {
                 val current = _scannedPages.value.toMutableList()
                 if (pageIdx in current.indices) {
                     current[pageIdx] = current[pageIdx].copy(
+                        quad = detectedQuad,
                         qualityReport = report,
                         classification = classification
                     )

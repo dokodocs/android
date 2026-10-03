@@ -8,6 +8,7 @@ import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.CameraSelector
+import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageCaptureException
 import androidx.camera.core.ImageProxy
@@ -15,8 +16,16 @@ import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -34,18 +43,21 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Cached
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CreditCard
 import androidx.compose.material.icons.filled.FlashOff
 import androidx.compose.material.icons.filled.FlashOn
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -61,6 +73,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -68,6 +84,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.bhrikuty.dokodocs.core.image.DocumentDetector
 import com.bhrikuty.dokodocs.core.image.DocumentQuad
 import com.bhrikuty.dokodocs.core.image.ImageProcessor
 import com.bhrikuty.dokodocs.theme.AppleBlue
@@ -112,6 +129,24 @@ fun CameraScannerScreen(
 
     val imageCapture = remember { ImageCapture.Builder().build() }
     val cameraExecutor = remember { Executors.newSingleThreadExecutor() }
+    val analysisExecutor = remember { Executors.newSingleThreadExecutor() }
+
+    // Live real-time detected quad on the camera preview stream
+    var liveDetectedQuad by remember { mutableStateOf<DocumentQuad?>(null) }
+    var isDocumentDetected by remember { mutableStateOf(false) }
+    var isProcessingCapture by remember { mutableStateOf(false) }
+
+    // Pulsing animation for the detected boundary
+    val infiniteTransition = rememberInfiniteTransition(label = "pulse")
+    val pulseAlpha by infiniteTransition.animateFloat(
+        initialValue = 0.6f,
+        targetValue = 1.0f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1000, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "pulseAlpha"
+    )
 
     // Gallery Picker
     val galleryLauncher = rememberLauncherForActivityResult(
@@ -139,11 +174,11 @@ fun CameraScannerScreen(
     }
 
     val docTypes = listOf(
-        DocTypeOption("auto", "Auto"),
+        DocTypeOption("auto", "Auto Detect"),
         DocTypeOption("a4", "A4 Document"),
-        DocTypeOption("idCard", "ID Card / Citizenship (Both Sides)"),
+        DocTypeOption("idCard", "ID / Citizenship"),
         DocTypeOption("receipt", "Receipt / Bill"),
-        DocTypeOption("book", "Book")
+        DocTypeOption("book", "Book Page")
     )
 
     Box(modifier = Modifier.fillMaxSize().background(Color.Black)) {
@@ -159,12 +194,44 @@ fun CameraScannerScreen(
                         }
                         val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
 
+                        // Real-time Frame Analysis for Live Edge Detection
+                        val imageAnalysis = ImageAnalysis.Builder()
+                            .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                            .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
+                            .build()
+
+                        var lastAnalysisTime = 0L
+                        imageAnalysis.setAnalyzer(analysisExecutor) { imageProxy ->
+                            val currentTime = System.currentTimeMillis()
+                            if (currentTime - lastAnalysisTime >= 200) { // Throttle ~5 fps for low CPU usage
+                                lastAnalysisTime = currentTime
+                                try {
+                                    val bitmap = imageProxy.toBitmap()
+                                    CoroutineScope(Dispatchers.Default).launch {
+                                        val quad = DocumentDetector.detectDocument(bitmap)
+                                        val normQuad = quad.scale(
+                                            1f / bitmap.width,
+                                            1f / bitmap.height
+                                        )
+                                        CoroutineScope(Dispatchers.Main).launch {
+                                            liveDetectedQuad = normQuad
+                                            isDocumentDetected = true
+                                        }
+                                    }
+                                } catch (e: Exception) {
+                                    // ignore frame error
+                                }
+                            }
+                            imageProxy.close()
+                        }
+
                         try {
                             cameraProvider.unbindAll()
                             val camera = cameraProvider.bindToLifecycle(
                                 lifecycleOwner,
                                 cameraSelector,
                                 preview,
+                                imageAnalysis,
                                 imageCapture
                             )
                             camera.cameraControl.enableTorch(isFlashEnabled)
@@ -178,22 +245,57 @@ fun CameraScannerScreen(
             )
         }
 
-        // Viewfinder Guide Overlay (Adapts shape to ID Card or Standard A4)
-        val guidePaddingH = if (isIdBothSidesMode) 28.dp else 36.dp
-        val guidePaddingV = if (isIdBothSidesMode) 190.dp else 120.dp
+        // Live Document Boundary Canvas Overlay (CamScanner-Grade Green Contour)
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            val canvasW = size.width
+            val canvasH = size.height
 
+            val quad = liveDetectedQuad
+            if (quad != null && isDocumentDetected) {
+                val pTL = androidx.compose.ui.geometry.Offset(quad.topLeft.x * canvasW, quad.topLeft.y * canvasH)
+                val pTR = androidx.compose.ui.geometry.Offset(quad.topRight.x * canvasW, quad.topRight.y * canvasH)
+                val pBR = androidx.compose.ui.geometry.Offset(quad.bottomRight.x * canvasW, quad.bottomRight.y * canvasH)
+                val pBL = androidx.compose.ui.geometry.Offset(quad.bottomLeft.x * canvasW, quad.bottomLeft.y * canvasH)
+
+                val docPath = Path().apply {
+                    moveTo(pTL.x, pTL.y)
+                    lineTo(pTR.x, pTR.y)
+                    lineTo(pBR.x, pBR.y)
+                    lineTo(pBL.x, pBL.y)
+                    close()
+                }
+
+                // Semi-transparent Green Document Tint
+                drawPath(
+                    path = docPath,
+                    color = AppleGreen.copy(alpha = 0.15f * pulseAlpha)
+                )
+
+                // Outer Green Glow & Border
+                drawPath(
+                    path = docPath,
+                    color = AppleGreen.copy(alpha = pulseAlpha),
+                    style = Stroke(width = 3.5.dp.toPx())
+                )
+
+                // Corner Handles
+                listOf(pTL, pTR, pBR, pBL).forEach { pt ->
+                    drawCircle(
+                        color = Color.White,
+                        radius = 8.dp.toPx(),
+                        center = pt
+                    )
+                    drawCircle(
+                        color = AppleGreen,
+                        radius = 5.5.dp.toPx(),
+                        center = pt
+                    )
+                }
+            }
+        }
+
+        // Status Pill: "Document Detected / Align Document"
         Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(horizontal = guidePaddingH, vertical = guidePaddingV)
-                .border(2.dp, if (isIdBothSidesMode) AppleOrange.copy(alpha = 0.85f) else PrimaryLight.copy(alpha = 0.75f), RoundedCornerShape(18.dp))
-        )
-
-        // ID Both Sides Flip Prompt Banner
-        AnimatedVisibility(
-            visible = isIdBothSidesMode,
-            enter = fadeIn(),
-            exit = fadeOut(),
             modifier = Modifier
                 .align(Alignment.TopCenter)
                 .padding(top = 96.dp)
@@ -201,24 +303,15 @@ fun CameraScannerScreen(
             Box(
                 modifier = Modifier
                     .clip(RoundedCornerShape(20.dp))
-                    .background(if (idScanStep == 1) AppleOrange else AppleBlue)
-                    .padding(horizontal = 16.dp, vertical = 8.dp)
+                    .background(if (isDocumentDetected) AppleGreen.copy(alpha = 0.9f) else Color.Black.copy(alpha = 0.65f))
+                    .padding(horizontal = 14.dp, vertical = 6.dp)
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        imageVector = if (idScanStep == 1) Icons.Default.Cached else Icons.Default.CreditCard,
-                        contentDescription = null,
-                        tint = Color.White,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = if (idScanStep == 1) "Flip ID to Scan Back Side (२/२)" else "Scan Front Side of ID (१/२)",
-                        color = Color.White,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
+                Text(
+                    text = if (isDocumentDetected) "🟢 Document Detected • Hold Steady" else "📄 Place Document in Frame",
+                    color = Color.White,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold
+                )
             }
         }
 
@@ -250,7 +343,7 @@ fun CameraScannerScreen(
                         .padding(horizontal = 12.dp, vertical = 7.dp)
                 ) {
                     Text(
-                        text = "Batch",
+                        text = if (isBatchMode) "Batch Mode (ON)" else "Batch",
                         color = Color.White,
                         fontSize = 12.sp,
                         fontWeight = FontWeight.SemiBold
@@ -289,20 +382,107 @@ fun CameraScannerScreen(
             }
         }
 
-        // Bottom Controls Container
+        // Bottom Controls Area
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .align(Alignment.BottomCenter)
-                .background(Color.Black.copy(alpha = 0.65f))
-                .padding(bottom = 32.dp, top = 16.dp),
+                .background(Color.Black.copy(alpha = 0.75f))
+                .padding(bottom = 28.dp, top = 12.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
+            // Live Multi-Scan Thumbnail Strip (Displays all captured photos in real-time)
+            if (scannedPages.isNotEmpty()) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 12.dp)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 4.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Scanned Pages (${scannedPages.size})",
+                            color = Color.White,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = "Tap to Edit / Reorder",
+                            color = PrimaryLight,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+
+                    LazyRow(
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        contentPadding = PaddingValues(horizontal = 16.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        itemsIndexed(scannedPages) { index, pageItem ->
+                            Box(
+                                modifier = Modifier
+                                    .size(width = 56.dp, height = 74.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .border(1.5.dp, PrimaryLight, RoundedCornerShape(8.dp))
+                                    .background(Color.DarkGray)
+                                    .clickable { onNavigateToCrop(index) }
+                            ) {
+                                Image(
+                                    bitmap = pageItem.bitmap.asImageBitmap(),
+                                    contentDescription = "Page ${index + 1}",
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier.fillMaxSize()
+                                )
+
+                                // Page Number Badge
+                                Box(
+                                    modifier = Modifier
+                                        .align(Alignment.BottomStart)
+                                        .background(Color.Black.copy(alpha = 0.7f))
+                                        .padding(horizontal = 4.dp, vertical = 1.dp)
+                                ) {
+                                    Text(
+                                        text = "${index + 1}",
+                                        color = Color.White,
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+
+                                // Delete (x) Button
+                                Box(
+                                    modifier = Modifier
+                                        .size(20.dp)
+                                        .align(Alignment.TopEnd)
+                                        .clip(CircleShape)
+                                        .background(Color.Red.copy(alpha = 0.85f))
+                                        .clickable { viewModel.removePage(index) },
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Close,
+                                        contentDescription = "Delete",
+                                        tint = Color.White,
+                                        modifier = Modifier.size(12.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             // Document Type Carousel
             LazyRow(
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
                 contentPadding = PaddingValues(horizontal = 16.dp),
-                modifier = Modifier.padding(bottom = 16.dp)
+                modifier = Modifier.padding(bottom = 14.dp)
             ) {
                 items(docTypes) { docType ->
                     val isSelected = selectedDocType == docType.id
@@ -323,11 +503,11 @@ fun CameraScannerScreen(
                 }
             }
 
-            // Shutter Button & Action Row
+            // Shutter & Done Buttons Row
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 32.dp),
+                    .padding(horizontal = 28.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -356,7 +536,8 @@ fun CameraScannerScreen(
                         .padding(6.dp)
                         .clip(CircleShape)
                         .background(if (isIdBothSidesMode && idScanStep == 1) AppleOrange else PrimaryLight)
-                        .clickable {
+                        .clickable(enabled = !isProcessingCapture) {
+                            isProcessingCapture = true
                             imageCapture.takePicture(
                                 cameraExecutor,
                                 object : ImageCapture.OnImageCapturedCallback() {
@@ -369,28 +550,31 @@ fun CameraScannerScreen(
 
                                         if (bitmap != null) {
                                             viewModel.addCapturedPage(bitmap)
-                                            if (isIdBothSidesMode) {
-                                                if (scannedPages.size >= 1) { // 2nd side captured
-                                                    CoroutineScope(Dispatchers.Main).launch {
-                                                        onNavigateToReview()
-                                                    }
-                                                }
-                                            } else if (!isBatchMode) {
-                                                CoroutineScope(Dispatchers.Main).launch {
+                                            CoroutineScope(Dispatchers.Main).launch {
+                                                isProcessingCapture = false
+                                                if (isIdBothSidesMode && scannedPages.size >= 1) {
+                                                    onNavigateToReview()
+                                                } else if (!isBatchMode) {
                                                     onNavigateToCrop(scannedPages.size)
                                                 }
                                             }
+                                        } else {
+                                            isProcessingCapture = false
                                         }
                                     }
 
                                     override fun onError(exception: ImageCaptureException) {
-                                        // Error handling
+                                        isProcessingCapture = false
                                     }
                                 }
                             )
                         },
                     contentAlignment = Alignment.Center
-                ) {}
+                ) {
+                    if (isProcessingCapture) {
+                        CircularProgressIndicator(modifier = Modifier.size(32.dp), color = Color.White)
+                    }
+                }
 
                 // Done / Review Button
                 if (scannedPages.isNotEmpty()) {
@@ -409,7 +593,7 @@ fun CameraScannerScreen(
                             modifier = Modifier
                                 .size(52.dp)
                                 .clip(CircleShape)
-                                .background(PrimaryLight)
+                                .background(AppleGreen)
                         ) {
                             Icon(
                                 imageVector = Icons.Default.Check,

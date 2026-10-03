@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
@@ -33,8 +34,6 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Crop
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.ErrorOutline
-import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.filled.WarningAmber
@@ -46,7 +45,6 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -76,7 +74,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.bhrikuty.dokodocs.core.image.ImageProcessor
 import com.bhrikuty.dokodocs.core.pdf.PageSizeFormat
-import com.bhrikuty.dokodocs.core.quality.IssueSeverity
 import com.bhrikuty.dokodocs.core.redact.RedactionProcessor
 import com.bhrikuty.dokodocs.core.redact.RedactionRect
 import com.bhrikuty.dokodocs.theme.AppleBlue
@@ -117,7 +114,7 @@ fun ScanReviewScreen(
     val currentPageIndex = pagerState.currentPage.coerceIn(0, scannedPages.size - 1)
     val currentPage = scannedPages[currentPageIndex]
 
-    // Rendered preview cache for current page with filter, crop, and redactions
+    // Rendered preview cache for current page
     var previewBitmap by remember(currentPageIndex, currentPage.filter, currentPage.quad, currentPage.redactions.size) {
         mutableStateOf<Bitmap?>(null)
     }
@@ -339,19 +336,19 @@ fun ScanReviewScreen(
                     ),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 4.dp)
+                        .padding(horizontal = 16.dp, vertical = 2.dp)
                 ) {
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                            .padding(horizontal = 12.dp, vertical = 6.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Icon(
                             imageVector = if (report.score >= 75) Icons.Default.CheckCircle else Icons.Default.WarningAmber,
                             contentDescription = null,
                             tint = if (report.score >= 75) AppleGreen else AppleOrange,
-                            modifier = Modifier.size(20.dp)
+                            modifier = Modifier.size(18.dp)
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Column(modifier = Modifier.weight(1f)) {
@@ -378,7 +375,7 @@ fun ScanReviewScreen(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                    .padding(horizontal = 16.dp, vertical = 4.dp),
                 contentAlignment = Alignment.Center
             ) {
                 if (previewBitmap != null) {
@@ -392,7 +389,6 @@ fun ScanReviewScreen(
                             .pointerInput(isRedactionMode) {
                                 if (isRedactionMode) {
                                     detectTapGestures { offset ->
-                                        // Add normalized redaction box at tap location
                                         val normX = (offset.x / size.width).coerceIn(0.1f, 0.9f)
                                         val normY = (offset.y / size.height).coerceIn(0.1f, 0.9f)
                                         val rect = android.graphics.RectF(
@@ -417,9 +413,61 @@ fun ScanReviewScreen(
                     .fillMaxWidth()
                     .background(MaterialTheme.colorScheme.surface)
                     .clip(RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp))
-                    .padding(vertical = 14.dp),
+                    .padding(vertical = 12.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
+                // Multi-Page Thumbnails Navigation Strip (When multiple pages exist)
+                if (scannedPages.size > 1) {
+                    LazyRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        contentPadding = PaddingValues(horizontal = 16.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 8.dp)
+                    ) {
+                        itemsIndexed(scannedPages) { index, item ->
+                            val isSelected = currentPageIndex == index
+                            Box(
+                                modifier = Modifier
+                                    .size(width = 44.dp, height = 58.dp)
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .border(
+                                        width = if (isSelected) 2.5.dp else 0.5.dp,
+                                        color = if (isSelected) PrimaryLight else Color.LightGray,
+                                        shape = RoundedCornerShape(6.dp)
+                                    )
+                                    .clickable {
+                                        coroutineScope.launch {
+                                            pagerState.animateScrollToPage(index)
+                                        }
+                                    }
+                            ) {
+                                Image(
+                                    bitmap = item.bitmap.asImageBitmap(),
+                                    contentDescription = "Thumb ${index + 1}",
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier.fillMaxSize()
+                                )
+                                Box(
+                                    modifier = Modifier
+                                        .align(Alignment.BottomCenter)
+                                        .fillMaxWidth()
+                                        .background(if (isSelected) PrimaryLight else Color.Black.copy(alpha = 0.6f))
+                                        .padding(vertical = 1.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = "${index + 1}",
+                                        color = Color.White,
+                                        fontSize = 9.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
                 // Action Buttons Row (Crop, Retake, Redact, Delete, Add Page)
                 Row(
                     modifier = Modifier
@@ -430,7 +478,7 @@ fun ScanReviewScreen(
                     IconButton(
                         onClick = { onNavigateToCrop(currentPageIndex) },
                         modifier = Modifier
-                            .size(44.dp)
+                            .size(42.dp)
                             .clip(CircleShape)
                             .background(MaterialTheme.colorScheme.surfaceVariant)
                     ) {
@@ -441,7 +489,7 @@ fun ScanReviewScreen(
                     IconButton(
                         onClick = { isRedactionMode = !isRedactionMode },
                         modifier = Modifier
-                            .size(44.dp)
+                            .size(42.dp)
                             .clip(CircleShape)
                             .background(if (isRedactionMode) ApplePurple else MaterialTheme.colorScheme.surfaceVariant)
                     ) {
@@ -455,7 +503,7 @@ fun ScanReviewScreen(
                     IconButton(
                         onClick = onNavigateToCamera,
                         modifier = Modifier
-                            .size(44.dp)
+                            .size(42.dp)
                             .clip(CircleShape)
                             .background(MaterialTheme.colorScheme.surfaceVariant)
                     ) {
@@ -467,7 +515,7 @@ fun ScanReviewScreen(
                             viewModel.removePage(currentPageIndex)
                         },
                         modifier = Modifier
-                            .size(44.dp)
+                            .size(42.dp)
                             .clip(CircleShape)
                             .background(MaterialTheme.colorScheme.surfaceVariant)
                     ) {
@@ -481,11 +529,11 @@ fun ScanReviewScreen(
                         fontSize = 11.sp,
                         color = ApplePurple,
                         fontWeight = FontWeight.SemiBold,
-                        modifier = Modifier.padding(top = 6.dp)
+                        modifier = Modifier.padding(top = 4.dp)
                     )
                 }
 
-                Spacer(modifier = Modifier.height(10.dp))
+                Spacer(modifier = Modifier.height(8.dp))
 
                 // Filter Choices
                 LazyRow(
