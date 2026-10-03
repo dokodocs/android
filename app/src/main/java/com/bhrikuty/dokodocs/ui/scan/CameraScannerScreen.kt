@@ -214,7 +214,31 @@ fun CameraScannerScreen(
                                             1f / bitmap.height
                                         )
                                         CoroutineScope(Dispatchers.Main).launch {
-                                            liveDetectedQuad = normQuad
+                                            val current = liveDetectedQuad
+                                            if (current != null) {
+                                                val alpha = 0.5f
+                                                liveDetectedQuad = DocumentQuad(
+                                                    topLeft = com.bhrikuty.dokodocs.core.image.Point2D(
+                                                        current.topLeft.x * (1 - alpha) + normQuad.topLeft.x * alpha,
+                                                        current.topLeft.y * (1 - alpha) + normQuad.topLeft.y * alpha
+                                                    ),
+                                                    topRight = com.bhrikuty.dokodocs.core.image.Point2D(
+                                                        current.topRight.x * (1 - alpha) + normQuad.topRight.x * alpha,
+                                                        current.topRight.y * (1 - alpha) + normQuad.topRight.y * alpha
+                                                    ),
+                                                    bottomRight = com.bhrikuty.dokodocs.core.image.Point2D(
+                                                        current.bottomRight.x * (1 - alpha) + normQuad.bottomRight.x * alpha,
+                                                        current.bottomRight.y * (1 - alpha) + normQuad.bottomRight.y * alpha
+                                                    ),
+                                                    bottomLeft = com.bhrikuty.dokodocs.core.image.Point2D(
+                                                        current.bottomLeft.x * (1 - alpha) + normQuad.bottomLeft.x * alpha,
+                                                        current.bottomLeft.y * (1 - alpha) + normQuad.bottomLeft.y * alpha
+                                                    ),
+                                                    confidence = normQuad.confidence
+                                                )
+                                            } else {
+                                                liveDetectedQuad = normQuad
+                                            }
                                             isDocumentDetected = true
                                         }
                                     }
@@ -549,13 +573,12 @@ fun CameraScannerScreen(
                                         imageProxy.close()
 
                                         if (bitmap != null) {
-                                            viewModel.addCapturedPage(bitmap)
+                                            val unnormQuad = liveDetectedQuad?.scale(bitmap.width.toFloat(), bitmap.height.toFloat())
+                                            viewModel.addCapturedPage(bitmap, unnormQuad)
                                             CoroutineScope(Dispatchers.Main).launch {
                                                 isProcessingCapture = false
-                                                if (isIdBothSidesMode && scannedPages.size >= 1) {
+                                                if (isIdBothSidesMode && scannedPages.size >= 2) {
                                                     onNavigateToReview()
-                                                } else if (!isBatchMode) {
-                                                    onNavigateToCrop(scannedPages.size)
                                                 }
                                             }
                                         } else {
